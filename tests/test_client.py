@@ -4,6 +4,8 @@ from collections.abc import AsyncGenerator, Generator
 
 import aiohttp
 import pytest
+from aioresponses import aioresponses
+
 from aionatureremo import (
     NatureRemoApiError,
     NatureRemoAuthError,
@@ -12,7 +14,6 @@ from aionatureremo import (
     NatureRemoRateLimitError,
     User,
 )
-from aioresponses import aioresponses
 
 API = "https://api.nature.global"
 
