@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -154,12 +154,63 @@ class AirconModeRange:
 
 
 @dataclass(frozen=True, slots=True)
+class AirconExtraOption:
+    """One selectable value of a device-specific AC parameter."""
+
+    value: str
+    text: str
+    default: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AirconExtraOption:
+        """Build from an API payload."""
+        return cls(
+            value=str(data["value"]),
+            text=str(data.get("text") or ""),
+            default=bool(data.get("default", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AirconExtra:
+    """A device-specific AC parameter (e.g. autoclean) and its options.
+
+    Sent to the API as an extra.= form field; only entries whose
+    availability is "available" may be written.
+    """
+
+    id: str
+    text: str
+    description: str
+    type: str
+    availability: str
+    options: list[AirconExtraOption]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AirconExtra:
+        """Build from an API payload."""
+        return cls(
+            id=str(data["id"]),
+            text=str(data.get("text") or ""),
+            description=str(data.get("description") or ""),
+            type=str(data.get("type") or ""),
+            availability=str(data.get("availability") or ""),
+            options=[
+                AirconExtraOption.from_dict(item)
+                for item in data.get("options") or []
+                if isinstance(item, dict) and "value" in item
+            ],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Aircon:
     """AC capabilities."""
 
     modes: dict[str, AirconModeRange]
     fixed_buttons: list[str]
     temp_unit: str
+    extras: list[AirconExtra] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Aircon:
@@ -173,6 +224,11 @@ class Aircon:
             },
             fixed_buttons=_str_list(range_data.get("fixedButtons")),
             temp_unit=str(data.get("tempUnit") or ""),
+            extras=[
+                AirconExtra.from_dict(item)
+                for item in range_data.get("extras") or []
+                if isinstance(item, dict) and "id" in item
+            ],
         )
 
 
@@ -188,6 +244,7 @@ class AirconSettings:
     direction_h: str
     button: str
     updated_at: datetime | None
+    extra: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AirconSettings:
@@ -201,6 +258,9 @@ class AirconSettings:
             direction_h=str(data.get("dirh") or ""),
             button=str(data.get("button") or ""),
             updated_at=_parse_datetime(data.get("updated_at")),
+            extra={
+                str(key): str(value) for key, value in (data.get("extra") or {}).items()
+            },
         )
 
 

@@ -292,3 +292,54 @@ def test_appliance_from_dict_ir_minimal() -> None:
     assert appliance.device_id is None
     assert appliance.model is None
     assert [s.name for s in appliance.signals] == ["Power"]
+
+
+DAIKIN_EXTRA_CATALOG = {
+    "id": "autoclean",
+    "text": "Mold Proof",
+    "description": "Dries the inside after cool/dry operation.",
+    "type": "choice",
+    "options": [
+        {"value": "off", "text": "Off", "default": True},
+        {"value": "on", "text": "On"},
+    ],
+    "availability": "available",
+}
+
+
+def test_aircon_settings_extra_parsed() -> None:
+    """settings.extra (remote-side state such as autoclean) is preserved."""
+    settings = AirconSettings.from_dict(
+        {"temp": "26", "mode": "cool", "extra": {"autoclean": "on"}}
+    )
+
+    assert settings.extra == {"autoclean": "on"}
+
+    empty = AirconSettings.from_dict({"temp": "26", "mode": "cool"})
+    assert empty.extra == {}
+
+
+def test_aircon_extras_catalog_parsed() -> None:
+    """range.extras enumerates device-specific parameters with options."""
+    aircon = Aircon.from_dict(
+        {
+            "range": {
+                "modes": {},
+                "fixedButtons": [],
+                "extras": [DAIKIN_EXTRA_CATALOG],
+            },
+            "tempUnit": "c",
+        }
+    )
+
+    assert len(aircon.extras) == 1
+    extra = aircon.extras[0]
+    assert extra.id == "autoclean"
+    assert extra.availability == "available"
+    assert [(o.value, o.default) for o in extra.options] == [
+        ("off", True),
+        ("on", False),
+    ]
+
+    no_extras = Aircon.from_dict({"range": {"modes": {}, "fixedButtons": []}})
+    assert no_extras.extras == []

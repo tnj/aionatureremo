@@ -254,3 +254,28 @@ async def test_send_signal(client: NatureRemoClient, mock_api: aioresponses) -> 
     mock_api.post(f"{API}/1/signals/signal-1/send", body="")
 
     assert await client.send_signal("signal-1") is None
+
+
+async def test_set_aircon_settings_serializes_extra(
+    client: NatureRemoClient, mock_api: aioresponses
+) -> None:
+    """extra entries become dotted extra.$id form fields."""
+    mock_api.post(
+        f"{API}/1/appliances/appliance-ac-1/aircon_settings",
+        payload={"temp": "26", "mode": "cool", "extra": {"autoclean": "on"}},
+    )
+
+    settings = await client.set_aircon_settings(
+        "appliance-ac-1",
+        operation_mode="cool",
+        button="",
+        extra={"autoclean": "on"},
+    )
+
+    assert settings.extra == {"autoclean": "on"}
+    calls = next(iter(mock_api.requests.values()))
+    assert calls[0].kwargs["data"] == {
+        "operation_mode": "cool",
+        "button": "",
+        "extra.autoclean": "on",
+    }

@@ -21,6 +21,8 @@ from .models import (
     EVENT_TEMPERATURE,
     TV,
     Aircon,
+    AirconExtra,
+    AirconExtraOption,
     AirconModeRange,
     AirconSettings,
     Appliance,
@@ -38,7 +40,7 @@ from .models import (
     User,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "API_BASE_URL",
@@ -54,6 +56,8 @@ __all__ = [
     "EVENT_TEMPERATURE",
     "TV",
     "Aircon",
+    "AirconExtra",
+    "AirconExtraOption",
     "AirconModeRange",
     "AirconSettings",
     "Appliance",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -140,8 +141,14 @@ class NatureRemoClient:
         air_direction_h: str | None = None,
         button: str | None = None,
         temperature_unit: str | None = None,
+        extra: Mapping[str, str] | None = None,
     ) -> AirconSettings:
-        """Update AC settings; only provided fields are sent."""
+        """Update AC settings; only provided fields are sent.
+
+        extra entries are serialized as extra.$id=$value form fields
+        (device-specific remote-side state such as autoclean); pass the
+        current AirconSettings.extra back to preserve it across sends.
+        """
         params = {
             "operation_mode": operation_mode,
             "temperature": temperature,
@@ -151,10 +158,14 @@ class NatureRemoClient:
             "button": button,
             "temperature_unit": temperature_unit,
         }
+        form = {key: value for key, value in params.items() if value is not None}
+        if extra:
+            for extra_id, extra_value in extra.items():
+                form[f"extra.{extra_id}"] = extra_value
         data = await self._request(
             "POST",
             f"/1/appliances/{appliance_id}/aircon_settings",
-            data={key: value for key, value in params.items() if value is not None},
+            data=form,
         )
         return AirconSettings.from_dict(data or {})
 
