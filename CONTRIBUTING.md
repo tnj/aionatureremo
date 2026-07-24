@@ -21,7 +21,8 @@ CI runs the same gate on Python 3.12 and 3.13.
 
 - Conventional-commit style messages (`feat:`, `fix:`, `chore:`, …).
 - Fully typed (`mypy --strict`); public API changes need tests.
-- Tests use aioresponses — never call the live Nature API from tests.
+- Tests run against a local aiohttp fake server (`tests/test_client.py`) —
+  never call the live Nature API from tests.
 - POST bodies are form-encoded (`data=`), never JSON; this mirrors the real
   Nature Cloud API.
 
