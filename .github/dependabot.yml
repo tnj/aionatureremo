@@ -9,11 +9,6 @@ updates:
       timezone: "Asia/Tokyo"
     cooldown:
       default-days: 7
-    ignore:
-      # aioresponses (<=0.7.9) is incompatible with aiohttp 3.14's
-      # ClientResponse signature; drop this once aioresponses supports it.
-      - dependency-name: "aiohttp"
-        update-types: ["version-update:semver-minor"]
     groups:
       python-dev:
         patterns: ["*"]

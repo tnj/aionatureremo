@@ -1,10 +1,18 @@
-"""Tests for the NatureRemoClient transport layer."""
+"""Tests for the NatureRemoClient transport layer.
 
-from collections.abc import AsyncGenerator, Generator
+The client talks to a real local aiohttp server (aiohttp's own test
+utilities) instead of a request-mocking library, so these tests stay valid
+for every aiohttp version the package supports.
+"""
+
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 import pytest
-from aioresponses import aioresponses
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from aionatureremo import (
     NatureRemoApiError,
@@ -15,47 +23,116 @@ from aionatureremo import (
     User,
 )
 
-API = "https://api.nature.global"
+
+@dataclass
+class RecordedRequest:
+    """One request received by the fake API."""
+
+    method: str
+    path: str
+    headers: dict[str, str]
+    data: dict[str, str]
+
+
+@dataclass
+class _ResponseSpec:
+    status: int
+    payload: Any
+    body: str | None
+    headers: dict[str, str]
+
+
+class FakeNatureApi:
+    """Programmable stand-in for api.nature.global."""
+
+    def __init__(self) -> None:
+        self.base_url = ""
+        self.requests: list[RecordedRequest] = []
+        self._responses: dict[tuple[str, str], _ResponseSpec] = {}
+
+    def respond(
+        self,
+        method: str,
+        path: str,
+        *,
+        status: int = 200,
+        payload: Any = None,
+        body: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Configure the response for a method + path."""
+        self._responses[(method, path)] = _ResponseSpec(
+            status=status, payload=payload, body=body, headers=headers or {}
+        )
+
+    async def handle(self, request: web.Request) -> web.Response:
+        """Record the request and serve the configured response."""
+        self.requests.append(
+            RecordedRequest(
+                method=request.method,
+                path=request.path,
+                headers=dict(request.headers),
+                data=dict(await request.post()),
+            )
+        )
+        spec = self._responses.get((request.method, request.path))
+        if spec is None:
+            return web.Response(status=404, text="unexpected request")
+        if spec.payload is not None:
+            return web.json_response(
+                spec.payload, status=spec.status, headers=spec.headers
+            )
+        return web.Response(
+            status=spec.status, text=spec.body or "", headers=spec.headers
+        )
+
+
+@pytest.fixture
+async def fake_api() -> AsyncGenerator[FakeNatureApi]:
+    """Serve a programmable fake Nature API on a local port."""
+    api = FakeNatureApi()
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", api.handle)
+    server = TestServer(app)
+    await server.start_server()
+    api.base_url = str(server.make_url("/"))
+    yield api
+    await server.close()
 
 
 @pytest.fixture
 async def session() -> AsyncGenerator[aiohttp.ClientSession]:
-    """Provide a real aiohttp session (intercepted by aioresponses)."""
+    """Provide a real aiohttp session."""
     session = aiohttp.ClientSession()
     yield session
     await session.close()
 
 
 @pytest.fixture
-def client(session: aiohttp.ClientSession) -> NatureRemoClient:
-    """Provide a client under test."""
-    return NatureRemoClient("test-token", session)
+def client(session: aiohttp.ClientSession, fake_api: FakeNatureApi) -> NatureRemoClient:
+    """Provide a client under test wired to the fake API."""
+    return NatureRemoClient("test-token", session, base_url=fake_api.base_url)
 
 
-@pytest.fixture
-def mock_api() -> Generator[aioresponses]:
-    """Intercept aiohttp requests."""
-    with aioresponses() as mocked:
-        yield mocked
-
-
-async def test_get_user(client: NatureRemoClient, mock_api: aioresponses) -> None:
+async def test_get_user(client: NatureRemoClient, fake_api: FakeNatureApi) -> None:
     """A successful GET parses the user and sends the bearer token."""
-    mock_api.get(f"{API}/1/users/me", payload={"id": "user-1", "nickname": "Alice"})
+    fake_api.respond(
+        "GET", "/1/users/me", payload={"id": "user-1", "nickname": "Alice"}
+    )
 
     user = await client.get_user()
 
     assert user == User(id="user-1", nickname="Alice")
-    calls = list(mock_api.requests.values())[0]  # noqa: RUF015
-    assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-token"
+    assert fake_api.requests[0].headers["Authorization"] == "Bearer test-token"
 
 
 async def test_rate_limit_headers_tracked(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """X-Rate-Limit headers update client.rate_limit."""
-    mock_api.get(
-        f"{API}/1/users/me",
+    fake_api.respond(
+        "GET",
+        "/1/users/me",
         payload={"id": "user-1", "nickname": "Alice"},
         headers={
             "X-Rate-Limit-Limit": "30",
@@ -72,10 +149,10 @@ async def test_rate_limit_headers_tracked(
 
 
 async def test_unauthorized_raises_auth_error(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """HTTP 401 raises NatureRemoAuthError."""
-    mock_api.get(f"{API}/1/users/me", status=401)
+    fake_api.respond("GET", "/1/users/me", status=401)
 
     with pytest.raises(NatureRemoAuthError) as err:
         await client.get_user()
@@ -83,11 +160,12 @@ async def test_unauthorized_raises_auth_error(
 
 
 async def test_rate_limited_raises_with_reset(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """HTTP 429 raises NatureRemoRateLimitError carrying the reset epoch."""
-    mock_api.get(
-        f"{API}/1/users/me",
+    fake_api.respond(
+        "GET",
+        "/1/users/me",
         status=429,
         headers={"X-Rate-Limit-Reset": "1752825600"},
     )
@@ -98,10 +176,10 @@ async def test_rate_limited_raises_with_reset(
 
 
 async def test_server_error_raises_api_error(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """HTTP 5xx raises NatureRemoApiError with the status."""
-    mock_api.get(f"{API}/1/users/me", status=500, body="boom")
+    fake_api.respond("GET", "/1/users/me", status=500, body="boom")
 
     with pytest.raises(NatureRemoApiError) as err:
         await client.get_user()
@@ -111,21 +189,20 @@ async def test_server_error_raises_api_error(
 
 
 async def test_network_failure_raises_connection_error(
-    client: NatureRemoClient, mock_api: aioresponses
+    session: aiohttp.ClientSession,
 ) -> None:
     """aiohttp errors surface as NatureRemoConnectionError."""
-    mock_api.get(
-        f"{API}/1/users/me", exception=aiohttp.ClientConnectionError("refused")
-    )
+    client = NatureRemoClient("test-token", session, base_url="http://127.0.0.1:1")
 
     with pytest.raises(NatureRemoConnectionError):
         await client.get_user()
 
 
-async def test_get_devices(client: NatureRemoClient, mock_api: aioresponses) -> None:
+async def test_get_devices(client: NatureRemoClient, fake_api: FakeNatureApi) -> None:
     """Devices endpoint parses into a list of Device."""
-    mock_api.get(
-        f"{API}/1/devices",
+    fake_api.respond(
+        "GET",
+        "/1/devices",
         payload=[
             {
                 "id": "device-1",
@@ -146,27 +223,28 @@ async def test_get_devices(client: NatureRemoClient, mock_api: aioresponses) -> 
 
 
 async def test_set_temperature_offset(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """Offset update POSTs a form body and returns the updated device."""
-    mock_api.post(
-        f"{API}/1/devices/device-1/temperature_offset",
+    fake_api.respond(
+        "POST",
+        "/1/devices/device-1/temperature_offset",
         payload={"id": "device-1", "name": "Living Remo", "temperature_offset": 2},
     )
 
     device = await client.set_temperature_offset("device-1", 2)
 
     assert device.temperature_offset == 2.0
-    calls = next(iter(mock_api.requests.values()))
-    assert calls[0].kwargs["data"] == {"offset": "2"}
+    assert fake_api.requests[0].data == {"offset": "2"}
 
 
 async def test_set_humidity_offset(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """Humidity offset hits its own endpoint."""
-    mock_api.post(
-        f"{API}/1/devices/device-1/humidity_offset",
+    fake_api.respond(
+        "POST",
+        "/1/devices/device-1/humidity_offset",
         payload={"id": "device-1", "name": "Living Remo", "humidity_offset": -3},
     )
 
@@ -175,10 +253,13 @@ async def test_set_humidity_offset(
     assert device.humidity_offset == -3.0
 
 
-async def test_get_appliances(client: NatureRemoClient, mock_api: aioresponses) -> None:
+async def test_get_appliances(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
     """Appliances endpoint parses into typed Appliance objects."""
-    mock_api.get(
-        f"{API}/1/appliances",
+    fake_api.respond(
+        "GET",
+        "/1/appliances",
         payload=[
             {
                 "id": "appliance-tv-1",
@@ -198,11 +279,12 @@ async def test_get_appliances(client: NatureRemoClient, mock_api: aioresponses) 
 
 
 async def test_set_aircon_settings(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """Only provided kwargs are form-encoded; empty strings are kept."""
-    mock_api.post(
-        f"{API}/1/appliances/appliance-ac-1/aircon_settings",
+    fake_api.respond(
+        "POST",
+        "/1/appliances/appliance-ac-1/aircon_settings",
         payload={"temp": "27", "mode": "cool", "vol": "auto", "button": ""},
     )
 
@@ -215,8 +297,7 @@ async def test_set_aircon_settings(
     )
 
     assert settings.temperature == "27"
-    calls = list(mock_api.requests.values())[0]  # noqa: RUF015
-    assert calls[0].kwargs["data"] == {
+    assert fake_api.requests[0].data == {
         "operation_mode": "cool",
         "temperature": "27",
         "air_volume": "auto",
@@ -224,23 +305,25 @@ async def test_set_aircon_settings(
     }
 
 
-async def test_send_tv_button(client: NatureRemoClient, mock_api: aioresponses) -> None:
+async def test_send_tv_button(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
     """TV button POST returns the new TV state."""
-    mock_api.post(f"{API}/1/appliances/appliance-tv-1/tv", payload={"input": "bs"})
+    fake_api.respond("POST", "/1/appliances/appliance-tv-1/tv", payload={"input": "bs"})
 
     state = await client.send_tv_button("appliance-tv-1", "bs")
 
     assert state.input == "bs"
-    calls = list(mock_api.requests.values())[0]  # noqa: RUF015
-    assert calls[0].kwargs["data"] == {"button": "bs"}
+    assert fake_api.requests[0].data == {"button": "bs"}
 
 
 async def test_send_light_button(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """Light button POST returns the new light state."""
-    mock_api.post(
-        f"{API}/1/appliances/appliance-light-1/light",
+    fake_api.respond(
+        "POST",
+        "/1/appliances/appliance-light-1/light",
         payload={"power": "off", "brightness": "100", "last_button": "off"},
     )
 
@@ -249,19 +332,20 @@ async def test_send_light_button(
     assert state.power == "off"
 
 
-async def test_send_signal(client: NatureRemoClient, mock_api: aioresponses) -> None:
+async def test_send_signal(client: NatureRemoClient, fake_api: FakeNatureApi) -> None:
     """Signal send POSTs an empty body and returns None."""
-    mock_api.post(f"{API}/1/signals/signal-1/send", body="")
+    fake_api.respond("POST", "/1/signals/signal-1/send", body="")
 
     assert await client.send_signal("signal-1") is None
 
 
 async def test_set_aircon_settings_serializes_extra(
-    client: NatureRemoClient, mock_api: aioresponses
+    client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:
     """extra entries become dotted extra.$id form fields."""
-    mock_api.post(
-        f"{API}/1/appliances/appliance-ac-1/aircon_settings",
+    fake_api.respond(
+        "POST",
+        "/1/appliances/appliance-ac-1/aircon_settings",
         payload={"temp": "26", "mode": "cool", "extra": {"autoclean": "on"}},
     )
 
@@ -273,8 +357,7 @@ async def test_set_aircon_settings_serializes_extra(
     )
 
     assert settings.extra == {"autoclean": "on"}
-    calls = next(iter(mock_api.requests.values()))
-    assert calls[0].kwargs["data"] == {
+    assert fake_api.requests[0].data == {
         "operation_mode": "cool",
         "button": "",
         "extra.autoclean": "on",
