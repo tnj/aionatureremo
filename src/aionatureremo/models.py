@@ -189,9 +189,10 @@ class AirconExtra:
     Sent to the API as an extra.= form field. Observed type vocabulary is
     "choice" (with options) and "time" (with default_time instead of
     options, written as HH:MM). Observed availability vocabulary is
-    "available" and "hidden"; hidden means not usable in the current
-    operation mode — writes of hidden extras return 200 but are silently
-    ignored server-side.
+    "available", "hidden" (not applicable to the current operation mode),
+    and "unavailable" (temporarily locked by conflicting stored state,
+    e.g. an armed new_sleep locks other comfort extras). Writes of
+    non-available extras return 200 but are silently ignored server-side.
     """
 
     id: str
