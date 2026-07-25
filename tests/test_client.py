@@ -305,6 +305,104 @@ async def test_set_aircon_settings(
     }
 
 
+# Mirrors the real floor_heater_settings response: the WHOLE Appliance
+# object, unlike aircon_settings which returns bare settings.
+FLOOR_HEATER_APPLIANCE_RESPONSE = {
+    "id": "appliance-fh-1",
+    "type": "FLOOR_HEATER",
+    "nickname": "Floor heater",
+    "image": "ico_floor_heater",
+    "device": {"id": "device-2", "name": "Bedroom Remo mini"},
+    "model": {"id": "model-fh-1", "country": "JP", "manufacturer": "Corona"},
+    "settings": {
+        "temp": "20",
+        "temp_unit": "c",
+        "mode": "warm",
+        "vol": "",
+        "dir": "",
+        "dirh": "",
+        "button": "",
+        "updated_at": "2026-07-25T02:40:44Z",
+        "extra": {"save_energy": "off"},
+    },
+    "aircon": None,
+    "signals": [],
+    "floor_heater": {
+        "range": {
+            "modes": {
+                "warm": {
+                    "temp": ["17", "18", "19", "20"],
+                    "dir": [""],
+                    "dirh": [""],
+                    "vol": [""],
+                }
+            },
+            "fixedButtons": ["power-off"],
+            "extras": [],
+        },
+        "tempUnit": "c",
+    },
+}
+
+
+async def test_set_floor_heater_settings(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """floor_heater_settings POSTs a form and parses the whole appliance."""
+    fake_api.respond(
+        "POST",
+        "/1/appliances/appliance-fh-1/floor_heater_settings",
+        payload=FLOOR_HEATER_APPLIANCE_RESPONSE,
+    )
+
+    appliance = await client.set_floor_heater_settings(
+        "appliance-fh-1",
+        operation_mode="warm",
+        temperature="20",
+        extra={"save_energy": "off"},
+    )
+
+    assert fake_api.requests[0].data == {
+        "operation_mode": "warm",
+        "temperature": "20",
+        "extra.save_energy": "off",
+    }
+    assert appliance.id == "appliance-fh-1"
+    assert appliance.settings is not None
+    assert appliance.settings.mode == "warm"
+    assert appliance.settings.temperature == "20"
+    assert appliance.settings.extra == {"save_energy": "off"}
+    assert appliance.aircon is None
+    assert appliance.floor_heater is not None
+    assert appliance.floor_heater.fixed_buttons == ["power-off"]
+
+
+async def test_set_floor_heater_settings_empty_body(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """A degenerate empty 200 body raises a typed error, not a KeyError."""
+    fake_api.respond(
+        "POST", "/1/appliances/appliance-fh-1/floor_heater_settings", body=""
+    )
+
+    with pytest.raises(NatureRemoApiError):
+        await client.set_floor_heater_settings("appliance-fh-1", button="power-off")
+
+
+async def test_send_light_projector_button(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """Projector button POSTs the form and tolerates the empty {} body."""
+    fake_api.respond(
+        "POST", "/1/appliances/appliance-projector-1/light_projector", payload={}
+    )
+
+    result = await client.send_light_projector_button("appliance-projector-1", "minus")
+
+    assert result is None
+    assert fake_api.requests[0].data == {"button": "minus"}
+
+
 async def test_send_tv_button(
     client: NatureRemoClient, fake_api: FakeNatureApi
 ) -> None:

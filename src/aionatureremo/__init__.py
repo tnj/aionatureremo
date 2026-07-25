@@ -10,8 +10,10 @@ from .exceptions import (
 )
 from .models import (
     APPLIANCE_TYPE_AC,
+    APPLIANCE_TYPE_FLOOR_HEATER,
     APPLIANCE_TYPE_IR,
     APPLIANCE_TYPE_LIGHT,
+    APPLIANCE_TYPE_LIGHT_PROJECTOR,
     APPLIANCE_TYPE_SMART_METER,
     APPLIANCE_TYPE_TV,
     ENERGY_UNIT_MULTIPLIERS,
@@ -30,7 +32,10 @@ from .models import (
     ApplianceModel,
     Device,
     EchonetLiteProperty,
+    FloorHeater,
     Light,
+    LightProjector,
+    LightProjectorButton,
     LightState,
     RateLimit,
     SensorValue,
@@ -40,13 +45,15 @@ from .models import (
     User,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "API_BASE_URL",
     "APPLIANCE_TYPE_AC",
+    "APPLIANCE_TYPE_FLOOR_HEATER",
     "APPLIANCE_TYPE_IR",
     "APPLIANCE_TYPE_LIGHT",
+    "APPLIANCE_TYPE_LIGHT_PROJECTOR",
     "APPLIANCE_TYPE_SMART_METER",
     "APPLIANCE_TYPE_TV",
     "ENERGY_UNIT_MULTIPLIERS",
@@ -65,7 +72,10 @@ __all__ = [
     "ApplianceModel",
     "Device",
     "EchonetLiteProperty",
+    "FloorHeater",
     "Light",
+    "LightProjector",
+    "LightProjectorButton",
     "LightState",
     "NatureRemoApiError",
     "NatureRemoAuthError",

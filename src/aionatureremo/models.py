@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -73,17 +73,23 @@ class Device:
     mac_address: str | None
     bt_mac_address: str | None
     serial_number: str | None
+    online: bool | None
     events: dict[str, SensorValue]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Device:
-        """Build from an API payload; unknown event keys are kept as-is."""
+        """Build from an API payload; unknown event keys are kept as-is.
+
+        online is only reported by newer firmware; None means "not
+        reported" (old firmware omits the field), never "offline".
+        """
         raw_events = data.get("newest_events") or {}
         events = {
             key: SensorValue.from_dict(value)
             for key, value in raw_events.items()
             if isinstance(value, dict) and "val" in value
         }
+        raw_online = data.get("online")
         return cls(
             id=str(data["id"]),
             name=str(data.get("name") or ""),
@@ -93,6 +99,7 @@ class Device:
             mac_address=data.get("mac_address"),
             bt_mac_address=data.get("bt_mac_address"),
             serial_number=data.get("serial_number"),
+            online=raw_online if isinstance(raw_online, bool) else None,
             events=events,
         )
 
@@ -107,6 +114,8 @@ class ApplianceModel:
     series: str | None
     name: str | None
     image: str | None
+    country: str | None
+    slug: str | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ApplianceModel:
@@ -118,6 +127,8 @@ class ApplianceModel:
             series=data.get("series"),
             name=data.get("name"),
             image=data.get("image"),
+            country=data.get("country"),
+            slug=data.get("slug"),
         )
 
 
@@ -175,8 +186,12 @@ class AirconExtraOption:
 class AirconExtra:
     """A device-specific AC parameter (e.g. autoclean) and its options.
 
-    Sent to the API as an extra.= form field; only entries whose
-    availability is "available" may be written.
+    Sent to the API as an extra.= form field. Observed type vocabulary is
+    "choice" (with options) and "time" (with default_time instead of
+    options, written as HH:MM). Observed availability vocabulary is
+    "available" and "hidden"; hidden means not usable in the current
+    operation mode — writes of hidden extras return 200 but are silently
+    ignored server-side.
     """
 
     id: str
@@ -185,6 +200,7 @@ class AirconExtra:
     type: str
     availability: str
     options: list[AirconExtraOption]
+    default_time: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AirconExtra:
@@ -200,6 +216,7 @@ class AirconExtra:
                 for item in data.get("options") or []
                 if isinstance(item, dict) and "value" in item
             ],
+            default_time=data.get("defaultTime"),
         )
 
 
@@ -213,7 +230,7 @@ class Aircon:
     extras: list[AirconExtra] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Aircon:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Build from an API payload."""
         range_data = data.get("range") or {}
         modes_data = range_data.get("modes") or {}
@@ -230,6 +247,17 @@ class Aircon:
                 if isinstance(item, dict) and "id" in item
             ],
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FloorHeater(Aircon):
+    """Floor heater capabilities.
+
+    The API's floor_heater capability object has exactly the aircon shape
+    (range.modes / range.fixedButtons / range.extras plus tempUnit;
+    probe-verified against a Corona rfc-a04), so this is a marker subclass
+    of Aircon with no additional fields.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,6 +376,63 @@ class Light:
             ],
             state=LightState.from_dict(data.get("state") or {}),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LightProjectorButton:
+    """A button leaf in a LIGHT_PROJECTOR remote layout.
+
+    Unlike TV/LIGHT buttons, the display text lives in the "text" field
+    ("label" is empty in real payloads).
+    """
+
+    name: str
+    text: str
+    image: str
+    uuid: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LightProjectorButton:
+        """Build from an API payload."""
+        return cls(
+            name=str(data.get("name") or ""),
+            text=str(data.get("text") or ""),
+            image=str(data.get("image") or ""),
+            uuid=str(data.get("uuid") or ""),
+        )
+
+
+def _collect_layout_buttons(node: Any, buttons: list[LightProjectorButton]) -> None:
+    """Collect type=="button" leaves from a layout tree in document order."""
+    if not isinstance(node, dict):
+        return
+    if node.get("type") == "button":
+        button = LightProjectorButton.from_dict(node)
+        if button.name:
+            buttons.append(button)
+        return
+    for child in node.get("templates") or []:
+        _collect_layout_buttons(child, buttons)
+
+
+@dataclass(frozen=True, slots=True)
+class LightProjector:
+    """A LIGHT_PROJECTOR appliance's virtual remote, flattened to buttons.
+
+    The API describes the remote as a UI layout tree (root → template /
+    composite nodes → button leaves) rather than a buttons[] array; only
+    the button leaves matter for control, so the tree is flattened in
+    document order, skipping unnamed leaves.
+    """
+
+    buttons: list[LightProjectorButton]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LightProjector:
+        """Build from the light_projector payload, walking its layout tree."""
+        buttons: list[LightProjectorButton] = []
+        _collect_layout_buttons(data.get("layout") or {}, buttons)
+        return cls(buttons=buttons)
 
 
 @dataclass(frozen=True, slots=True)
@@ -472,6 +557,8 @@ APPLIANCE_TYPE_TV = "TV"
 APPLIANCE_TYPE_LIGHT = "LIGHT"
 APPLIANCE_TYPE_IR = "IR"
 APPLIANCE_TYPE_SMART_METER = "EL_SMART_METER"
+APPLIANCE_TYPE_FLOOR_HEATER = "FLOOR_HEATER"
+APPLIANCE_TYPE_LIGHT_PROJECTOR = "LIGHT_PROJECTOR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,8 +573,10 @@ class Appliance:
     model: ApplianceModel | None
     settings: AirconSettings | None
     aircon: Aircon | None
+    floor_heater: FloorHeater | None
     tv: TV | None
     light: Light | None
+    light_projector: LightProjector | None
     smart_meter: SmartMeter | None
     signals: list[Signal]
 
@@ -510,8 +599,18 @@ class Appliance:
                 else None
             ),
             aircon=Aircon.from_dict(data["aircon"]) if data.get("aircon") else None,
+            floor_heater=(
+                FloorHeater.from_dict(data["floor_heater"])
+                if data.get("floor_heater")
+                else None
+            ),
             tv=TV.from_dict(data["tv"]) if data.get("tv") else None,
             light=Light.from_dict(data["light"]) if data.get("light") else None,
+            light_projector=(
+                LightProjector.from_dict(data["light_projector"])
+                if data.get("light_projector")
+                else None
+            ),
             smart_meter=(
                 SmartMeter.from_dict(data["smart_meter"])
                 if data.get("smart_meter")

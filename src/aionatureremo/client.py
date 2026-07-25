@@ -169,6 +169,43 @@ class NatureRemoClient:
         )
         return AirconSettings.from_dict(data or {})
 
+    async def set_floor_heater_settings(
+        self,
+        appliance_id: str,
+        *,
+        operation_mode: str | None = None,
+        temperature: str | None = None,
+        button: str | None = None,
+        extra: Mapping[str, str] | None = None,
+    ) -> Appliance:
+        """Update floor heater settings; only provided fields are sent.
+
+        Unlike aircon_settings, the response body is the whole updated
+        Appliance object. Power on by sending operation_mode (the stored
+        button becomes ""); power off with button="power-off". The server
+        clamps out-of-range temperatures to the current mode's list
+        (never a 4xx). extra entries are serialized as extra.$id=$value
+        form fields, and extras not resent are cleared (same rule as
+        aircon), so pass the current settings.extra back on every write.
+        """
+        params = {
+            "operation_mode": operation_mode,
+            "temperature": temperature,
+            "button": button,
+        }
+        form = {key: value for key, value in params.items() if value is not None}
+        if extra:
+            for extra_id, extra_value in extra.items():
+                form[f"extra.{extra_id}"] = extra_value
+        data = await self._request(
+            "POST",
+            f"/1/appliances/{appliance_id}/floor_heater_settings",
+            data=form,
+        )
+        if not data:
+            raise NatureRemoApiError(200, "Empty floor_heater_settings response body")
+        return Appliance.from_dict(data)
+
     async def send_tv_button(self, appliance_id: str, button: str) -> TVState:
         """Press a TV button and return the new TV state."""
         data = await self._request(
@@ -182,6 +219,18 @@ class NatureRemoClient:
             "POST", f"/1/appliances/{appliance_id}/light", data={"button": button}
         )
         return LightState.from_dict(data or {})
+
+    async def send_light_projector_button(self, appliance_id: str, button: str) -> None:
+        """Press a light projector button (a LightProjectorButton name).
+
+        The API returns 200 with an empty JSON object; there is no
+        projector state anywhere, so the body is ignored.
+        """
+        await self._request(
+            "POST",
+            f"/1/appliances/{appliance_id}/light_projector",
+            data={"button": button},
+        )
 
     async def send_signal(self, signal_id: str) -> None:
         """Send a learned IR signal."""
