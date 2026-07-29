@@ -31,6 +31,8 @@ from .models import (
     ApplianceButton,
     ApplianceModel,
     Device,
+    EchonetLiteAppliance,
+    EchonetLiteApplianceProperty,
     EchonetLiteProperty,
     FloorHeater,
     Light,
@@ -45,7 +47,7 @@ from .models import (
     User,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "API_BASE_URL",
@@ -71,6 +73,8 @@ __all__ = [
     "ApplianceButton",
     "ApplianceModel",
     "Device",
+    "EchonetLiteAppliance",
+    "EchonetLiteApplianceProperty",
     "EchonetLiteProperty",
     "FloorHeater",
     "Light",

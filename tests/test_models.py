@@ -11,6 +11,7 @@ from aionatureremo import (
     Appliance,
     ApplianceModel,
     Device,
+    EchonetLiteAppliance,
     FloorHeater,
     Light,
     LightProjector,
@@ -661,3 +662,59 @@ def test_light_projector_skips_unnamed_buttons() -> None:
 
     empty = LightProjector.from_dict({})
     assert empty.buttons == []
+
+
+def test_echonetlite_appliance_from_dict() -> None:
+    """Parses the Remo E API shape: hex EPC strings and a capital-D Device key."""
+    appliance = EchonetLiteAppliance.from_dict(
+        {
+            "id": "el-appliance-1",
+            "nickname": "スマートメーター",
+            "type": "EL_SMART_METER",
+            "properties": [
+                {"epc": "e7", "val": "000004ed", "updated_at": "2026-07-29T07:54:09Z"},
+                {"epc": "8a", "val": "000016", "updated_at": "2026-07-29T07:55:20Z"},
+            ],
+            "Device": {
+                "id": "device-elite-1",
+                "name": "Remo E lite",
+                "firmware_version": "Remo-E-lite/1.12.0",
+                "mac_address": "aa:bb:cc:dd:ee:ff",
+                "serial_number": "4W0000000000000",
+                "temperature_offset": 0,
+                "humidity_offset": 0,
+            },
+        }
+    )
+
+    assert appliance.id == "el-appliance-1"
+    assert appliance.nickname == "スマートメーター"
+    assert appliance.type == "EL_SMART_METER"
+    assert [prop.epc for prop in appliance.properties] == ["e7", "8a"]
+    assert appliance.properties[0].val == "000004ed"
+    assert appliance.properties[0].updated_at == datetime(
+        2026, 7, 29, 7, 54, 9, tzinfo=UTC
+    )
+    assert appliance.device is not None
+    assert appliance.device.name == "Remo E lite"
+    assert appliance.device.online is None  # endpoint omits the online field
+
+
+def test_echonetlite_appliance_tolerates_missing_fields() -> None:
+    """No Device key, absent updated_at, and junk property entries survive."""
+    appliance = EchonetLiteAppliance.from_dict(
+        {
+            "id": "el-appliance-2",
+            "properties": [
+                {"epc": "d3", "val": "00000001"},
+                "junk",
+                {"val": "no-epc"},
+            ],
+        }
+    )
+
+    assert appliance.nickname == ""
+    assert appliance.type == ""
+    assert appliance.device is None
+    assert [prop.epc for prop in appliance.properties] == ["d3"]
+    assert appliance.properties[0].updated_at is None

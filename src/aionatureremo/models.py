@@ -553,6 +553,64 @@ class SmartMeter:
         return self._cumulative_kwh(EPC_REVERSE_CUMULATIVE_ENERGY)
 
 
+@dataclass(frozen=True, slots=True)
+class EchonetLiteApplianceProperty:
+    """A raw EPC property from the Nature Remo E API.
+
+    Unlike the classic appliance payload's EchonetLiteProperty (decimal
+    ``epc`` int), the Remo E API represents ``epc`` and ``val`` as
+    lowercase hex strings, ``val`` zero-padded to the EPC's byte length
+    (probe-verified 2026-07-29). Values are opaque to this library.
+    """
+
+    epc: str
+    val: str
+    updated_at: datetime | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EchonetLiteApplianceProperty:
+        """Build from an API payload."""
+        return cls(
+            epc=str(data["epc"]),
+            val=str(data.get("val") or ""),
+            updated_at=_parse_datetime(data.get("updated_at")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EchonetLiteAppliance:
+    """An appliance from ``GET /1/echonetlite/appliances`` (Nature Remo E API).
+
+    Types seen or documented: ``EL_SMART_METER`` (probe-verified on this
+    endpoint), ``EL_STORAGE_BATTERY``, ``EL_SOLAR_POWER``, ``EL_EVCD``,
+    ``EL_ELECTRIC_WATER_HEATER``.
+    """
+
+    id: str
+    nickname: str
+    type: str
+    properties: list[EchonetLiteApplianceProperty]
+    device: Device | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EchonetLiteAppliance:
+        """Build from an API payload; the device key is capital-D ``Device``."""
+        raw_device = data.get("Device")
+        return cls(
+            id=str(data["id"]),
+            nickname=str(data.get("nickname") or ""),
+            type=str(data.get("type") or ""),
+            properties=[
+                EchonetLiteApplianceProperty.from_dict(item)
+                for item in data.get("properties") or []
+                if isinstance(item, dict) and "epc" in item
+            ],
+            device=(
+                Device.from_dict(raw_device) if isinstance(raw_device, dict) else None
+            ),
+        )
+
+
 APPLIANCE_TYPE_AC = "AC"
 APPLIANCE_TYPE_TV = "TV"
 APPLIANCE_TYPE_LIGHT = "LIGHT"

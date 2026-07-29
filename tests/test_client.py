@@ -198,6 +198,80 @@ async def test_network_failure_raises_connection_error(
         await client.get_user()
 
 
+async def test_get_echonetlite_appliances(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """Parses the wrapper object {"appliances": [...]} from the Remo E API."""
+    fake_api.respond(
+        "GET",
+        "/1/echonetlite/appliances",
+        payload={
+            "appliances": [
+                {
+                    "id": "el-appliance-1",
+                    "nickname": "Meter",
+                    "type": "EL_SMART_METER",
+                    "properties": [
+                        {
+                            "epc": "e7",
+                            "val": "000004ed",
+                            "updated_at": "2026-07-29T07:54:09Z",
+                        }
+                    ],
+                    "Device": {"id": "device-elite-1", "name": "Remo E lite"},
+                }
+            ]
+        },
+    )
+
+    appliances = await client.get_echonetlite_appliances()
+
+    assert len(appliances) == 1
+    assert appliances[0].type == "EL_SMART_METER"
+    assert appliances[0].properties[0].val == "000004ed"
+    assert appliances[0].device is not None
+    assert appliances[0].device.id == "device-elite-1"
+
+
+async def test_get_echonetlite_appliances_empty(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """An account with no ECHONET Lite appliances yields an empty list."""
+    fake_api.respond("GET", "/1/echonetlite/appliances", payload={"appliances": []})
+
+    assert await client.get_echonetlite_appliances() == []
+
+
+async def test_request_echonetlite_refresh(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """Sends comma-joined EPCs form-urlencoded and accepts the 202 response."""
+    fake_api.respond(
+        "POST",
+        "/1/echonetlite/appliances/el-appliance-1/refresh",
+        status=202,
+        payload={},
+    )
+
+    await client.request_echonetlite_refresh("el-appliance-1", ["8a", "d3"])
+
+    request = fake_api.requests[0]
+    assert request.method == "POST"
+    assert request.path == "/1/echonetlite/appliances/el-appliance-1/refresh"
+    assert request.data == {"epc": "8a,d3"}
+
+
+async def test_request_echonetlite_refresh_validates_epc_count(
+    client: NatureRemoClient, fake_api: FakeNatureApi
+) -> None:
+    """0 or >12 EPCs is rejected client-side without any request."""
+    with pytest.raises(ValueError):
+        await client.request_echonetlite_refresh("el-appliance-1", [])
+    with pytest.raises(ValueError):
+        await client.request_echonetlite_refresh("el-appliance-1", ["8a"] * 13)
+    assert fake_api.requests == []
+
+
 async def test_get_devices(client: NatureRemoClient, fake_api: FakeNatureApi) -> None:
     """Devices endpoint parses into a list of Device."""
     fake_api.respond(
