@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import aiohttp
@@ -19,6 +19,7 @@ from .models import (
     AirconSettings,
     Appliance,
     Device,
+    EchonetLiteAppliance,
     LightState,
     RateLimit,
     TVState,
@@ -235,3 +236,32 @@ class NatureRemoClient:
     async def send_signal(self, signal_id: str) -> None:
         """Send a learned IR signal."""
         await self._request("POST", f"/1/signals/{signal_id}/send")
+
+    async def get_echonetlite_appliances(self) -> list[EchonetLiteAppliance]:
+        """Return ECHONET Lite appliances with their collected EPC values.
+
+        Nature Remo E API. EPCs are lowercase hex strings here, unlike the
+        decimal ints in the classic appliance payload's
+        echonetlite_properties.
+        """
+        data = await self._request("GET", "/1/echonetlite/appliances")
+        items = (data or {}).get("appliances") or []
+        return [EchonetLiteAppliance.from_dict(item) for item in items]
+
+    async def request_echonetlite_refresh(
+        self, appliance_id: str, epcs: Sequence[str]
+    ) -> None:
+        """Ask the Remo E to fetch fresh values for 1-12 EPCs.
+
+        The API blocks for the device round trip (~2 s observed) and then
+        answers 202; refreshed EPCs appear in get_echonetlite_appliances()
+        from the next call on, permanently. The write-side ``set`` endpoint
+        (a paid Nature option) is deliberately not implemented.
+        """
+        if not 1 <= len(epcs) <= 12:
+            raise ValueError("epcs must contain between 1 and 12 EPC codes")
+        await self._request(
+            "POST",
+            f"/1/echonetlite/appliances/{appliance_id}/refresh",
+            data={"epc": ",".join(epcs)},
+        )
