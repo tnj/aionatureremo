@@ -16,3 +16,10 @@ async with aiohttp.ClientSession() as session:
 ```
 
 Get an access token at https://home.nature.global/.
+
+The Nature Remo E API (`/1/echonetlite/appliances` — smart meters and,
+per Nature's docs, storage batteries / solar / EV chargers / water
+heaters) is exposed via `get_echonetlite_appliances()` and
+`request_echonetlite_refresh(appliance_id, epcs)`. EPC values pass
+through as raw lowercase-hex strings; `POST …/set` (a paid Nature
+option) is deliberately not implemented.
