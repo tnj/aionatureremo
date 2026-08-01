@@ -15,3 +15,23 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  draft-release:
+    # Leaves a draft on the releases page so a tagged version cannot ship
+    # without its notes. The notes themselves stay hand-written.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+    steps:
+      - name: Open a draft release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "${TAG} already has a release; nothing to draft."
+            exit 0
+          fi
+          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft \
+            --title "${TAG}" \
+            --notes "_Draft opened by the release workflow. Replace this with the release notes, then publish._"
