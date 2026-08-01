@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Problem with the Nature Remo integration in Home Assistant
+    url: https://github.com/home-assistant/core/issues
+    about: Issues with the Nature Remo integration belong in the Home Assistant core repository, unless a developer asked you to report here.
+  - name: I have a question or need support
+    url: https://www.home-assistant.io/help
+    about: GitHub is for tracking bugs; the Home Assistant website lists the support channels.
